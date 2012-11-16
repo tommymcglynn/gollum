@@ -364,11 +364,21 @@ module Precious
         @mathjax = wiki.mathjax
         @css = wiki.css
         @h1_title = wiki.h1_title
-        mustache :page
+        if settings.wiki_options[:readonly]
+          mustache :page_readonly
+        else
+          mustache :page
+        end
       elsif file = wiki.file(fullpath)
         content_type file.mime_type
         file.raw_data
       else
+        if settings.wiki_options[:readonly]
+          mustache :create_readonly
+        else
+           @name = name
+          mustache :create
+        end
         page_path = [path, name].compact.join('/')
         redirect to("/create/#{clean_url(encodeURIComponent(page_path))}")
       end
