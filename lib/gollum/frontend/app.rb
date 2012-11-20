@@ -119,129 +119,157 @@ module Precious
     end
 
     get '/edit/*' do
-      wikip = wiki_page(params[:splat].first)
-      @name = wikip.name
-      @path = wikip.path
-      wiki = wikip.wiki
-      if page = wikip.page
-        if wiki.live_preview && page.format.to_s.include?('markdown') && supported_useragent?(request.user_agent)
-          live_preview_url = '/livepreview/index.html?page=' + encodeURIComponent(@name)
-          if @path
-            live_preview_url << '&path=' + encodeURIComponent(@path)
+      if settings.wiki_options[:editable]
+        wikip = wiki_page(params[:splat].first)
+        @name = wikip.name
+        @path = wikip.path
+        wiki = wikip.wiki
+        if page = wikip.page
+          if wiki.live_preview && page.format.to_s.include?('markdown') && supported_useragent?(request.user_agent)
+            live_preview_url = '/livepreview/index.html?page=' + encodeURIComponent(@name)
+            if @path
+              live_preview_url << '&path=' + encodeURIComponent(@path)
+            end
+            redirect to(live_preview_url)
+          else
+            @page = page
+            @page.version = wiki.repo.log(wiki.ref, @page.path).first
+            raw_data = page.raw_data
+            @content = raw_data.respond_to?(:force_encoding) ? raw_data.force_encoding('UTF-8') : raw_data
+            mustache :edit
           end
-          redirect to(live_preview_url)
         else
-          @page = page
-          @page.version = wiki.repo.log(wiki.ref, @page.path).first
-          raw_data = page.raw_data
-          @content = raw_data.respond_to?(:force_encoding) ? raw_data.force_encoding('UTF-8') : raw_data
-          mustache :edit
+          redirect to("/create/#{encodeURIComponent(@name)}")
         end
       else
-        redirect to("/create/#{encodeURIComponent(@name)}")
+        redirect_bad_url()
       end
     end
 
     post '/edit/*' do
-      path      = '/' + clean_url(sanitize_empty_params(params[:path])).to_s
-      page_name = CGI.unescape(params[:page])
-      wiki      = wiki_new
-      page      = wiki.paged(page_name, path, exact = true)
-      return if page.nil?
-      rename    = params[:rename].to_url if params[:rename]
-      name      = rename || page.name
-      committer = Gollum::Committer.new(wiki, commit_message)
-      commit    = {:committer => committer}
+      if settings.wiki_options[:editable]
+        path      = '/' + clean_url(sanitize_empty_params(params[:path])).to_s
+        page_name = CGI.unescape(params[:page])
+        wiki      = wiki_new
+        page      = wiki.paged(page_name, path, exact = true)
+        return if page.nil?
+        rename    = params[:rename].to_url if params[:rename]
+        name      = rename || page.name
+        committer = Gollum::Committer.new(wiki, commit_message)
+        commit    = {:committer => committer}
 
-      update_wiki_page(wiki, page, params[:content], commit, name, params[:format])
-      update_wiki_page(wiki, page.header,  params[:header],  commit) if params[:header]
-      update_wiki_page(wiki, page.footer,  params[:footer],  commit) if params[:footer]
-      update_wiki_page(wiki, page.sidebar, params[:sidebar], commit) if params[:sidebar]
-      committer.commit
+        update_wiki_page(wiki, page, params[:content], commit, name, params[:format])
+        update_wiki_page(wiki, page.header,  params[:header],  commit) if params[:header]
+        update_wiki_page(wiki, page.footer,  params[:footer],  commit) if params[:footer]
+        update_wiki_page(wiki, page.sidebar, params[:sidebar], commit) if params[:sidebar]
+        committer.commit
 
-      page = wiki.page(rename) if rename
+        page = wiki.page(rename) if rename
 
-      redirect to("/#{page.escaped_url_path}") unless page.nil?
+        redirect to("/#{page.escaped_url_path}") unless page.nil?
+      else
+        redirect_bad_url()
+      end
     end
 
     get '/delete/*' do
-      wikip = wiki_page(params[:splat].first)
-      name = wikip.name
-      wiki = wikip.wiki
-      page = wikip.page
-      wiki.delete_page(page, { :message => "Destroyed #{name} (#{page.format})" })
+      if settings.wiki_options[:editable]
+        wikip = wiki_page(params[:splat].first)
+        name = wikip.name
+        wiki = wikip.wiki
+        page = wikip.page
+        wiki.delete_page(page, { :message => "Destroyed #{name} (#{page.format})" })
 
-      redirect to('/')
+        redirect to('/')
+      else
+        redirect_bad_url()
+      end
     end
 
     get '/create/*' do
-      wikip = wiki_page(params[:splat].first.gsub('+', '-'))
-      @name = wikip.name.to_url
-      @path = wikip.path
+      if settings.wiki_options[:editable]
+        wikip = wiki_page(params[:splat].first.gsub('+', '-'))
+        @name = wikip.name.to_url
+        @path = wikip.path
 
-      page = wikip.page
-      if page
-        redirect to("/#{page.escaped_url_path}")
+        page = wikip.page
+        if page
+          redirect to("/#{page.escaped_url_path}")
+        else
+          mustache :create
+        end
       else
-        mustache :create
+        redirect_bad_url()
       end
     end
 
     post '/create' do
-      name         = params[:page].to_url
-      path         = sanitize_empty_params(params[:path]) || ''
-      format       = params[:format].intern
+      if settings.wiki_options[:editable]
+        name         = params[:page].to_url
+        path         = sanitize_empty_params(params[:path]) || ''
+        format       = params[:format].intern
 
-      # ensure pages are created in page_file_dir
-      page_dir = settings.wiki_options[:page_file_dir].to_s
-      path = clean_url(::File.join(page_dir, path)) unless path.start_with?(page_dir)
+        # ensure pages are created in page_file_dir
+        page_dir = settings.wiki_options[:page_file_dir].to_s
+        path = clean_url(::File.join(page_dir, path)) unless path.start_with?(page_dir)
 
-      # write_page is not directory aware so use wiki_options to emulate dir support.
-      wiki_options = settings.wiki_options.merge({ :page_file_dir => path })
-      wiki         = Gollum::Wiki.new(settings.gollum_path, wiki_options)
+        # write_page is not directory aware so use wiki_options to emulate dir support.
+        wiki_options = settings.wiki_options.merge({ :page_file_dir => path })
+        wiki         = Gollum::Wiki.new(settings.gollum_path, wiki_options)
 
-      begin
-        wiki.write_page(name, format, params[:content], commit_message)
-        redirect to("/#{clean_url(::File.join(path,name))}")
-      rescue Gollum::DuplicatePageError => e
-        @message = "Duplicate page: #{e.message}"
-        mustache :error
+        begin
+          wiki.write_page(name, format, params[:content], commit_message)
+          redirect to("/#{clean_url(::File.join(path,name))}")
+        rescue Gollum::DuplicatePageError => e
+          @message = "Duplicate page: #{e.message}"
+          mustache :error
+        end
+      else
+        redirect_bad_url()
       end
     end
 
     post '/revert/:page/*' do
-      wikip        = wiki_page(params[:page])
-      @path        = wikip.path
-      @name        = wikip.name
-      wiki         = wikip.wiki
-      @page        = wiki.paged(@name,@path)
-      shas         = params[:splat].first.split("/")
-      sha1         = shas.shift
-      sha2         = shas.shift
+      if settings.wiki_options[:editable]
+        wikip        = wiki_page(params[:page])
+        @path        = wikip.path
+        @name        = wikip.name
+        wiki         = wikip.wiki
+        @page        = wiki.paged(@name,@path)
+        shas         = params[:splat].first.split("/")
+        sha1         = shas.shift
+        sha2         = shas.shift
 
-      if wiki.revert_page(@page, sha1, sha2, commit_message)
-        redirect to("/#{@page.escaped_url_path}")
+        if wiki.revert_page(@page, sha1, sha2, commit_message)
+          redirect to("/#{@page.escaped_url_path}")
+        else
+          sha2, sha1 = sha1, "#{sha1}^" if !sha2
+          @versions  = [sha1, sha2]
+          diffs      = wiki.repo.diff(@versions.first, @versions.last, @page.path)
+          @diff      = diffs.first
+          @message   = "The patch does not apply."
+          mustache :compare
+        end
       else
-        sha2, sha1 = sha1, "#{sha1}^" if !sha2
-        @versions  = [sha1, sha2]
-        diffs      = wiki.repo.diff(@versions.first, @versions.last, @page.path)
-        @diff      = diffs.first
-        @message   = "The patch does not apply."
-        mustache :compare
+        redirect_bad_url()
       end
     end
 
     post '/preview' do
-      wiki     = wiki_new
-      @name    = params[:page] || "Preview"
-      @page    = wiki.preview_page(@name, params[:content], params[:format])
-      @content = @page.formatted_data
-      @toc_content = wiki.universal_toc ? @page.toc_data : nil
-      @mathjax = wiki.mathjax
-      @css = wiki.css
-      @h1_title = wiki.h1_title
-      @editable = false
-      mustache :page
+      if settings.wiki_options[:editable]
+        wiki     = wiki_new
+        @name    = params[:page] || "Preview"
+        @page    = wiki.preview_page(@name, params[:content], params[:format])
+        @content = @page.formatted_data
+        @toc_content = wiki.universal_toc ? @page.toc_data : nil
+        @mathjax = wiki.mathjax
+        @css = wiki.css
+        @h1_title = wiki.h1_title
+        @editable = false #Always set to false
+        mustache :page
+      else
+        redirect_bad_url()
+      end
     end
 
     get '/history/*' do
@@ -298,7 +326,7 @@ module Precious
         @page = page
         @name = name
         @content = page.formatted_data
-        @editable = true
+        @editable = settings.wiki_options[:editable]
         mustache :page
       else
         halt 404
@@ -358,7 +386,7 @@ module Precious
       if page = wiki.paged(name, path, exact = true)
         @page = page
         @name = name
-        @editable = true
+        @editable = settings.wiki_options[:editable]
         @content = page.formatted_data
         @toc_content = wiki.universal_toc ? @page.toc_data : nil
         @mathjax = wiki.mathjax
@@ -369,8 +397,9 @@ module Precious
         content_type file.mime_type
         file.raw_data
       else
-        page_path = [path, name].compact.join('/')
-        redirect to("/create/#{clean_url(encodeURIComponent(page_path))}")
+        #page_path = [path, name].compact.join('/')
+        #redirect to("/create/#{clean_url(encodeURIComponent(page_path))}")
+        redirect_bad_url()
       end
     end
 
@@ -381,6 +410,10 @@ module Precious
       format    = (format || page.format).to_sym
       content ||= page.raw_data
       wiki.update_page(page, name, format, content.to_s, commit)
+    end
+
+    def redirect_bad_url
+      redirect to("/Home")
     end
 
     private

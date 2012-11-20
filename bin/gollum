@@ -45,6 +45,11 @@ opts = OptionParser.new do |opts|
     options['irb'] = true
   end
 
+  opts.on("--editable", "Start gollum with pages editable") do
+    puts "Starting Gollum in editable mode"
+    wiki_options[:editable] = true;
+  end
+
   opts.on("--css", "Inject custom css. Uses custom.css from root repository") do
     wiki_options[:css] = true
   end

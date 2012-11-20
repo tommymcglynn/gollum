@@ -168,6 +168,7 @@ module Gollum
     #           :show_all      - Show all files in file view, not just valid pages.
     #                            Default: false
     #           :collapse_tree - Start with collapsed file view. Default: false
+    #           :editable      - Allow files to be editable. Default: false
     #
     # Returns a fresh Gollum::Repo.
     def initialize(path, options = {})
@@ -203,6 +204,7 @@ module Gollum
       @collapse_tree        = options.fetch :collapse_tree, false
       @css                  = options.fetch :css, false
       @h1_title             = options.fetch :h1_title, false
+      @editable             = options.fetch :editable, false
 
       @user_icons           = ['gravatar', 'identicon'].include?( options[:user_icons] ) ?
                               options[:user_icons] : 'none'
@@ -623,6 +625,9 @@ module Gollum
 
     # Start with collapsed file view. Default: false
     attr_reader :collapse_tree
+
+    # Allow files to be editable. Default: false
+    attr_reader :editable
 
     # Normalize the data.
     #
