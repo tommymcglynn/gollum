@@ -112,178 +112,6 @@ module Precious
       Gollum::Wiki.new(settings.gollum_path, settings.wiki_options)
     end
 
-    get '/data/*' do
-      if page = wiki_page(params[:splat].first).page
-        page.raw_data
-      end
-    end
-
-    get '/edit/*' do
-      wikip = wiki_page(params[:splat].first)
-      @name = wikip.name
-      @path = wikip.path
-      wiki = wikip.wiki
-      if page = wikip.page
-        if wiki.live_preview && page.format.to_s.include?('markdown') && supported_useragent?(request.user_agent)
-          live_preview_url = '/livepreview/index.html?page=' + encodeURIComponent(@name)
-          if @path
-            live_preview_url << '&path=' + encodeURIComponent(@path)
-          end
-          redirect to(live_preview_url)
-        else
-          @page = page
-          @page.version = wiki.repo.log(wiki.ref, @page.path).first
-          raw_data = page.raw_data
-          @content = raw_data.respond_to?(:force_encoding) ? raw_data.force_encoding('UTF-8') : raw_data
-          mustache :edit
-        end
-      else
-        redirect to("/create/#{encodeURIComponent(@name)}")
-      end
-    end
-
-    post '/edit/*' do
-      path      = '/' + clean_url(sanitize_empty_params(params[:path])).to_s
-      page_name = CGI.unescape(params[:page])
-      wiki      = wiki_new
-      page      = wiki.paged(page_name, path, exact = true)
-      return if page.nil?
-      rename    = params[:rename].to_url if params[:rename]
-      name      = rename || page.name
-      committer = Gollum::Committer.new(wiki, commit_message)
-      commit    = {:committer => committer}
-
-      update_wiki_page(wiki, page, params[:content], commit, name, params[:format])
-      update_wiki_page(wiki, page.header,  params[:header],  commit) if params[:header]
-      update_wiki_page(wiki, page.footer,  params[:footer],  commit) if params[:footer]
-      update_wiki_page(wiki, page.sidebar, params[:sidebar], commit) if params[:sidebar]
-      committer.commit
-
-      page = wiki.page(rename) if rename
-
-      redirect to("/#{page.escaped_url_path}") unless page.nil?
-    end
-
-    get '/delete/*' do
-      wikip = wiki_page(params[:splat].first)
-      name = wikip.name
-      wiki = wikip.wiki
-      page = wikip.page
-      wiki.delete_page(page, { :message => "Destroyed #{name} (#{page.format})" })
-
-      redirect to('/')
-    end
-
-    get '/create/*' do
-      wikip = wiki_page(params[:splat].first.gsub('+', '-'))
-      @name = wikip.name.to_url
-      @path = wikip.path
-
-      page = wikip.page
-      if page
-        redirect to("/#{page.escaped_url_path}")
-      else
-        mustache :create
-      end
-    end
-
-    post '/create' do
-      name         = params[:page].to_url
-      path         = sanitize_empty_params(params[:path]) || ''
-      format       = params[:format].intern
-
-      # ensure pages are created in page_file_dir
-      page_dir = settings.wiki_options[:page_file_dir].to_s
-      path = clean_url(::File.join(page_dir, path)) unless path.start_with?(page_dir)
-
-      # write_page is not directory aware so use wiki_options to emulate dir support.
-      wiki_options = settings.wiki_options.merge({ :page_file_dir => path })
-      wiki         = Gollum::Wiki.new(settings.gollum_path, wiki_options)
-
-      begin
-        wiki.write_page(name, format, params[:content], commit_message)
-        redirect to("/#{clean_url(::File.join(path,name))}")
-      rescue Gollum::DuplicatePageError => e
-        @message = "Duplicate page: #{e.message}"
-        mustache :error
-      end
-    end
-
-    post '/revert/:page/*' do
-      wikip        = wiki_page(params[:page])
-      @path        = wikip.path
-      @name        = wikip.name
-      wiki         = wikip.wiki
-      @page        = wiki.paged(@name,@path)
-      shas         = params[:splat].first.split("/")
-      sha1         = shas.shift
-      sha2         = shas.shift
-
-      if wiki.revert_page(@page, sha1, sha2, commit_message)
-        redirect to("/#{@page.escaped_url_path}")
-      else
-        sha2, sha1 = sha1, "#{sha1}^" if !sha2
-        @versions  = [sha1, sha2]
-        diffs      = wiki.repo.diff(@versions.first, @versions.last, @page.path)
-        @diff      = diffs.first
-        @message   = "The patch does not apply."
-        mustache :compare
-      end
-    end
-
-    post '/preview' do
-      wiki     = wiki_new
-      @name    = params[:page] || "Preview"
-      @page    = wiki.preview_page(@name, params[:content], params[:format])
-      @content = @page.formatted_data
-      @toc_content = wiki.universal_toc ? @page.toc_data : nil
-      @mathjax = wiki.mathjax
-      @css = wiki.css
-      @h1_title = wiki.h1_title
-      @editable = false
-      mustache :page
-    end
-
-    get '/history/*' do
-      @page        = wiki_page(params[:splat].first).page
-      @page_num    = [params[:page].to_i, 1].max
-      @versions    = @page.versions :page => @page_num
-      mustache :history
-    end
-
-    post '/compare/*' do
-      @file     = params[:splat].first
-      @versions = params[:versions] || []
-      if @versions.size < 2
-        redirect to("/history/#{@file}")
-      else
-        redirect to("/compare/%s/%s...%s" % [
-          @file,
-          @versions.last,
-          @versions.first]
-        )
-      end
-    end
-
-    get %r{
-      /compare/ # match any URL beginning with /compare/
-      (.+)      # extract the full path (including any directories)
-      /         # match the final slash
-      ([^.]+)   # match the first SHA1
-      \.{2,3}   # match .. or ...
-      (.+)      # match the second SHA1
-    }x do |path, start_version, end_version|
-      wikip        = wiki_page(path)
-      @path        = wikip.path
-      @name        = wikip.name
-      @versions    = [start_version, end_version]
-      wiki         = wikip.wiki
-      @page        = wikip.page
-      diffs        = wiki.repo.diff(@versions.first, @versions.last, @page.path)
-      @diff        = diffs.first
-      mustache :compare
-    end
-
     get %r{^/(javascript|css|images)} do
       halt 404
     end
@@ -298,7 +126,7 @@ module Precious
         @page = page
         @name = name
         @content = page.formatted_data
-        @editable = true
+        @editable = false
         mustache :page
       else
         halt 404
@@ -312,35 +140,6 @@ module Precious
       @results = wiki.search(@query).sort{ |a, b| (a[:count] <=> b[:count]).nonzero? || b[:name] <=> a[:name] }.reverse
       @name = @query
       mustache :search
-    end
-
-    get %r{
-      /pages  # match any URL beginning with /pages
-      (?:     # begin an optional non-capturing group
-        /(.+) # capture any path after the "/pages" excluding the leading slash
-      )?      # end the optional non-capturing group
-    }x do |path|
-      @path        = extract_path(path) if path
-      wiki_options = settings.wiki_options.merge({ :page_file_dir => @path })
-      wiki         = Gollum::Wiki.new(settings.gollum_path, wiki_options)
-      @results     = wiki.pages
-      @results     += wiki.files if settings.wiki_options[:show_all]
-      @ref         = wiki.ref
-      mustache :pages
-    end
-
-    get '/fileview' do
-      wiki = wiki_new
-      options = settings.wiki_options
-      content = wiki.pages
-      # if showing all files include wiki.files
-      content += wiki.files if options[:show_all]
-
-      # must pass wiki_options to FileView
-      # --show-all and --collapse-tree can be set.
-      @results = Gollum::FileView.new(content, options).render_files
-      @ref = wiki.ref
-      mustache :file_view, { :layout => false }
     end
 
     get '/*' do
@@ -358,29 +157,19 @@ module Precious
       if page = wiki.paged(name, path, exact = true)
         @page = page
         @name = name
-        @editable = true
+        @editable = false
         @content = page.formatted_data
         @toc_content = wiki.universal_toc ? @page.toc_data : nil
         @mathjax = wiki.mathjax
         @css = wiki.css
         @h1_title = wiki.h1_title
-        if settings.wiki_options[:readonly]
-          mustache :page_readonly
-        else
-          mustache :page
-        end
+        mustache :page
       elsif file = wiki.file(fullpath)
         content_type file.mime_type
         file.raw_data
       else
-        if settings.wiki_options[:readonly]
-          mustache :create_readonly
-        else
-           @name = name
-          mustache :create
-        end
         page_path = [path, name].compact.join('/')
-        redirect to("/create/#{clean_url(encodeURIComponent(page_path))}")
+        halt 404
       end
     end
 
