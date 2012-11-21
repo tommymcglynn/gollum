@@ -93,6 +93,10 @@ module Precious
         @css
       end
 
+      def js # custom javascript
+        @js
+      end
+
       def use_identicon
         @page.wiki.user_icons == 'identicon'
       end

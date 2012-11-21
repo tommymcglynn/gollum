@@ -141,6 +141,10 @@ module Gollum
     # Defaults to false
     attr_reader :css
 
+    # Injects custom javascript from custom.js in root repo.
+    # Defaults to false
+    attr_reader :js
+
     # Sets page title to value of first h1
     # Defaults to false
     attr_reader :h1_title
@@ -169,6 +173,7 @@ module Gollum
     #                            Default: false
     #           :collapse_tree - Start with collapsed file view. Default: false
     #           :editable      - Allow files to be editable. Default: false
+    #           :js            - Load custom javascript. Default: false
     #
     # Returns a fresh Gollum::Repo.
     def initialize(path, options = {})
@@ -205,6 +210,7 @@ module Gollum
       @css                  = options.fetch :css, false
       @h1_title             = options.fetch :h1_title, false
       @editable             = options.fetch :editable, false
+      @js                   = options.fetch :js, false
 
       @user_icons           = ['gravatar', 'identicon'].include?( options[:user_icons] ) ?
                               options[:user_icons] : 'none'
